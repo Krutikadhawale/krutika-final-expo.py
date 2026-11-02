@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>English to Hindi Translator</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Hind:wght@400;600&family=Tiro+Devanagari+Hindi&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#eef1f6; --surface:#ffffff; --ink:#16213a; --muted:#5d6881;
+  --line:#d3d9e6; --accent:#0f766e; --accent-ink:#ffffff; --err:#b42318;
+  --sans:"Hind","Segoe UI",system-ui,sans-serif;
+  --deva:"Tiro Devanagari Hindi","Nirmala UI","Mangal",serif;
+}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]){
+    --bg:#0f1524; --surface:#182036; --ink:#e8ecf6; --muted:#95a0bb;
+    --line:#2a3552; --accent:#2dd4bf; --accent-ink:#06201d; --err:#ff8a80;
+  }
+}
+*{box-sizing:border-box}
+html,body{margin:0}
+body{background:var(--bg);color:var(--ink);font-family:var(--sans);font-size:17px;line-height:1.5;min-height:100vh}
+.wrap{max-width:980px;margin:0 auto;padding:32px 20px 56px}
+h1{font-family:var(--deva);font-size:clamp(28px,5vw,42px);font-weight:400;margin:0 0 6px;line-height:1.2}
+.sub{color:var(--muted);margin:0 0 28px;max-width:60ch}
+.panes{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+@media (max-width:720px){.panes{grid-template-columns:1fr}}
+.pane{background:var(--surface);border:1px solid var(--line);border-radius:10px;display:flex;flex-direction:column;min-height:240px}
+.pane label,.pane .lab{font-weight:600;font-size:15px;color:var(--muted);padding:12px 16px 0}
+textarea,.out{flex:1;width:100%;border:0;background:transparent;color:var(--ink);padding:8px 16px 12px;font-size:19px;line-height:1.55;resize:vertical;min-height:150px;outline:none;font-family:var(--sans)}
+.out{font-family:var(--deva);font-size:22px;white-space:pre-wrap;word-break:break-word}
+.out.empty{color:var(--muted);font-family:var(--sans);font-size:17px}
+.out.err{color:var(--err);font-family:var(--sans);font-size:16px}
+.bar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:10px 12px;border-top:1px solid var(--line)}
+.bar .count{margin-left:auto;color:var(--muted);font-size:14px}
+button{font:inherit;font-size:15px;border:1px solid var(--line);background:transparent;color:var(--ink);padding:7px 14px;border-radius:7px;cursor:pointer}
+button:hover:not(:disabled){border-color:var(--accent)}
+button:disabled{opacity:.5;cursor:default}
+button.primary{background:var(--accent);color:var(--accent-ink);border-color:var(--accent);font-weight:600}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.pane:focus-within{border-color:var(--accent)}
+.hint{color:var(--muted);font-size:14px;margin:10px 2px 0}
+.hist-head{display:flex;align-items:center;justify-content:space-between;margin:40px 0 10px}
+.hist-head h2{font-size:20px;margin:0}
+ul{list-style:none;margin:0;padding:0}
+li{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:12px 16px;margin-bottom:8px;cursor:pointer}
+li:hover{border-color:var(--accent)}
+li .en{color:var(--muted);font-size:15px}
+li .hi{font-family:var(--deva);font-size:20px;margin-top:2px}
+.none{color:var(--muted)}
+</style>
+</head>
+<body>
+<main class="wrap">
+  <h1>अंग्रेज़ी से हिंदी अनुवादक</h1>
+  <p class="sub">English to Hindi Translator. Type any English sentence or paragraph and get the Hindi translation instantly.</p>
+
+  <section class="panes">
+    <div class="pane">
+      <label for="src">English</label>
+      <textarea id="src" placeholder="Type or paste English text here" autofocus></textarea>
+      <div class="bar">
+        <button class="primary" id="go">Translate</button>
+        <button id="clear">Clear</button>
+        <span class="count" id="count">0 characters</span>
+      </div>
+    </div>
+    <div class="pane">
+      <span class="lab">Hindi</span>
+      <div class="out empty" id="out" aria-live="polite">The translation will appear here.</div>
+      <div class="bar">
+        <button id="copy" disabled>Copy</button>
+        <button id="speak" disabled>Listen</button>
+      </div>
+    </div>
+  </section>
+  <p class="hint">Press Ctrl + Enter to translate. An internet connection is required.</p>
+
+  <div class="hist-head">
+    <h2>History</h2>
+    <button id="clearHist">Clear history</button>
+  </div>
+  <ul id="hist"></ul>
+</main>
+
+<script>
+(function () {
+  var MAX_CHARS = 450;
+  var HKEY = "hindi_translator_history";
+  var $ = function (id) { return document.getElementById(id); };
+  var src = $("src"), out = $("out"), go = $("go"), copyBtn = $("copy"), speakBtn = $("speak");
+  var histEl = $("hist"), history = [], lastResult = "";
+
+  /* ---------- translation (same logic as the Python version) ---------- */
+  function googleTranslate(text) {
+    var url = "https://translate.googleapis.com/translate_a/single?client=gtx&sl=en&tl=hi&dt=t&q=" + encodeURIComponent(text);
+    return fetch(url).then(function (r) {
+      if (!r.ok) throw new Error("Google HTTP " + r.status);
+      return r.json();
+    }).then(function (data) {
+      return data[0].map(function (p) { return p[0]; }).filter(Boolean).join("");
+    });
+  }
+
+  function myMemoryTranslate(text) {
+    var url = "https://api.mymemory.translated.net/get?q=" + encodeURIComponent(text) + "&langpair=en|hi";
+    return fetch(url).then(function (r) {
+      if (!r.ok) throw new Error("MyMemory HTTP " + r.status);
+      return r.json();
+    }).then(function (data) { return data.responseData.translatedText; });
+  }
+
+  function splitIntoChunks(text) {
+    var sentences = text.trim().split(/(?<=[.!?\u0964])\s+/);
+    var chunks = [], current = "";
+    sentences.forEach(function (s) {
+      while (s.length > MAX_CHARS) {
+        var cut = s.lastIndexOf(" ", MAX_CHARS);
+        if (cut === -1) cut = MAX_CHARS;
+        if (current) { chunks.push(current); current = ""; }
+        chunks.push(s.slice(0, cut));
+        s = s.slice(cut).trim();
+      }
+      if ((current + " " + s).trim().length <= MAX_CHARS) {
+        current = (current + " " + s).trim();
+      } else {
+        if (current) chunks.push(current);
+        current = s;
+      }
+    });
+    if (current) chunks.push(current);
+    return chunks;
+  }
+
+  function translateChunk(chunk) {
+    return googleTranslate(chunk).catch(function () { return myMemoryTranslate(chunk); });
+  }
+
+  function translate(text) {
+    var chunks = splitIntoChunks(text), results = [];
+    return chunks.reduce(function (p, chunk) {
+      return p.then(function () {
+        return translateChunk(chunk).then(function (r) { results.push(r); });
+      });
+    }, Promise.resolve()).then(function () { return results.join(" "); });
+  }
+
+  /* ---------- UI ---------- */
+  function show(text, cls) {
+    out.textContent = text;
+    out.className = "out" + (cls ? " " + cls : "");
+  }
+
+  function run() {
+    var text = src.value.trim();
+    if (!text) { show("Please enter a sentence.", "err"); src.focus(); return; }
+    go.disabled = true; go.textContent = "Translating...";
+    translate(text).then(function (result) {
+      lastResult = result;
+      show(result);
+      copyBtn.disabled = false; speakBtn.disabled = false;
+      addHistory(text, result);
+    }).catch(function () {
+      lastResult = "";
+      show("Translation failed. Check your internet connection and try again.", "err");
+      copyBtn.disabled = true; speakBtn.disabled = true;
+    }).then(function () {
+      go.disabled = false; go.textContent = "Translate";
+    });
+  }
+
+  /* ---------- history (kept in this browser) ---------- */
+  function loadHistory() {
+    try { history = JSON.parse(localStorage.getItem(HKEY)) || []; } catch (e) { history = []; }
+    renderHistory();
+  }
+  function saveHistory() {
+    try { localStorage.setItem(HKEY, JSON.stringify(history)); } catch (e) {}
+  }
+  function addHistory(en, hi) {
+    history.unshift({ en: en, hi: hi });
+    history = history.slice(0, 20);
+    saveHistory(); renderHistory();
+  }
+  function renderHistory() {
+    histEl.innerHTML = "";
+    if (!history.length) {
+      var li = document.createElement("li");
+      li.className = "none"; li.style.cursor = "default";
+      li.textContent = "No translations yet. Translate a sentence to see it here.";
+      histEl.appendChild(li); return;
+    }
+    history.forEach(function (h) {
+      var li = document.createElement("li");
+      li.title = "Click to load again";
+      var en = document.createElement("div"); en.className = "en"; en.textContent = h.en;
+      var hi = document.createElement("div"); hi.className = "hi"; hi.textContent = h.hi;
+      li.appendChild(en); li.appendChild(hi);
+      li.addEventListener("click", function () {
+        src.value = h.en; lastResult = h.hi; show(h.hi);
+        copyBtn.disabled = false; speakBtn.disabled = false; updateCount();
+      });
+      histEl.appendChild(li);
+    });
+  }
+
+  function updateCount() { $("count").textContent = src.value.length + " characters"; }
+
+  /* ---------- events ---------- */
+  go.addEventListener("click", run);
+  src.addEventListener("input", updateCount);
+  src.addEventListener("keydown", function (e) {
+    if ((e.ctrlKey || e.metaKey) && e.key === "Enter") { e.preventDefault(); run(); }
+  });
+  $("clear").addEventListener("click", function () {
+    src.value = ""; lastResult = ""; updateCount();
+    show("The translation will appear here.", "empty");
+    copyBtn.disabled = true; speakBtn.disabled = true; src.focus();
+  });
+  copyBtn.addEventListener("click", function () {
+    if (!lastResult) return;
+    var done = function () { copyBtn.textContent = "Copied"; setTimeout(function () { copyBtn.textContent = "Copy"; }, 1500); };
+    if (navigator.clipboard) navigator.clipboard.writeText(lastResult).then(done);
+  });
+  speakBtn.addEventListener("click", function () {
+    if (!lastResult || !window.speechSynthesis) return;
+    window.speechSynthesis.cancel();
+    var u = new SpeechSynthesisUtterance(lastResult);
+    u.lang = "hi-IN";
+    window.speechSynthesis.speak(u);
+  });
+  $("clearHist").addEventListener("click", function () { history = []; saveHistory(); renderHistory(); });
+
+  loadHistory();
+})();
+</script>
+</body>
+</html>
